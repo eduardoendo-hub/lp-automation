@@ -1,8 +1,7 @@
 name: 'Campaign switch'
 description: >
-  Roda o script de switch de turma da LP (que vive dentro de cada repo de LP)
-  e, se algo foi commitado, dispara redeploy no Coolify via webhook de deploy
-  da app.
+  Roda o script de switch de turma da LP e, se commitou algo, dispara
+  redeploy no Coolify via API (POST com Bearer).
 
 inputs:
   switch-script:
@@ -13,12 +12,14 @@ inputs:
     description: 'Versão do Node pra rodar o script'
     required: false
     default: '20'
-  coolify-deploy-webhook:
+  coolify-deploy-url:
     description: >
-      URL completa do deploy webhook da app no Coolify. A URL inteira é o
-      segredo — nao usa Bearer. Encontrada no Coolify em: app → Webhooks (ou
-      Resource Operations). Se vazio, o deploy e' pulado (commit fica mas
-      rebuild precisa ser manual).
+      URL completa da API de deploy do Coolify, incluindo o UUID da app como
+      query param. Formato: http(s)://<host>/api/v1/deploy?uuid=<UUID>&force=false
+    required: false
+    default: ''
+  coolify-token:
+    description: 'API token do Coolify (scope root — enviado como Bearer)'
     required: false
     default: ''
 
@@ -44,14 +45,18 @@ runs:
       shell: bash
       run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-    - name: Dispara deploy no Coolify (webhook)
-      if: steps.pre.outputs.sha != steps.post.outputs.sha && inputs.coolify-deploy-webhook != ''
+    - name: Dispara deploy no Coolify
+      if: steps.pre.outputs.sha != steps.post.outputs.sha && inputs.coolify-deploy-url != '' && inputs.coolify-token != ''
       shell: bash
       env:
-        WEBHOOK_URL: ${{ inputs.coolify-deploy-webhook }}
+        DEPLOY_URL: ${{ inputs.coolify-deploy-url }}
+        TOKEN:      ${{ inputs.coolify-token }}
       run: |
         set -euo pipefail
-        http_code=$(curl -sS -o /tmp/out -w "%{http_code}" "$WEBHOOK_URL")
+        http_code=$(curl -sS -o /tmp/out -w "%{http_code}" \
+          -X POST "$DEPLOY_URL" \
+          -H "Authorization: Bearer $TOKEN" \
+          -H "Accept: application/json")
         echo "HTTP $http_code"
         head -c 500 /tmp/out || true
         echo
@@ -61,11 +66,11 @@ runs:
         esac
 
     - name: Status final (sem deploy)
-      if: steps.pre.outputs.sha == steps.post.outputs.sha || inputs.coolify-deploy-webhook == ''
+      if: steps.pre.outputs.sha == steps.post.outputs.sha || inputs.coolify-deploy-url == '' || inputs.coolify-token == ''
       shell: bash
       run: |
         if [ "${{ steps.pre.outputs.sha }}" = "${{ steps.post.outputs.sha }}" ]; then
           echo "Sem commit novo — nada a deployar."
         else
-          echo "Commit feito, mas secret coolify-deploy-webhook ausente — rebuild manual no dashboard."
+          echo "Commit feito, mas secrets Coolify ausentes — rebuild manual no dashboard."
         fi

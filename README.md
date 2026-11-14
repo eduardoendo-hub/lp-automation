@@ -47,8 +47,9 @@ jobs:
           fetch-depth: 0
       - uses: eduardoendo-hub/lp-automation/.github/actions/campaign-switch@main
         with:
-          switch-script:          scripts/campaign-switch.mjs     # opcional (default)
-          coolify-deploy-webhook: ${{ secrets.COOLIFY_DEPLOY_WEBHOOK }}
+          switch-script:       scripts/campaign-switch.mjs     # opcional (default)
+          coolify-deploy-url:  ${{ secrets.COOLIFY_DEPLOY_URL }}  # http://.../api/v1/deploy?uuid=XXX&force=false
+          coolify-token:       ${{ secrets.COOLIFY_TOKEN }}
 ```
 
 E dentro da LP, crie `scripts/campaign-switch.mjs` + `campaigns-schedule.json`
@@ -71,22 +72,30 @@ E dentro da LP, crie `scripts/campaign-switch.mjs` + `campaigns-schedule.json`
 |---|---|---|
 | `switch-script` | `scripts/campaign-switch.mjs` | Caminho do script Node da LP |
 | `node-version` | `20` | Versão do Node |
-| `coolify-deploy-webhook` | `''` | URL completa do deploy webhook da app no Coolify. A URL inteira é o segredo (não usa Bearer). Se vazia, o deploy é pulado. |
+| `coolify-deploy-url` | `''` | URL completa da API de deploy, incluindo o UUID como query param: `http(s)://<host>/api/v1/deploy?uuid=<UUID>&force=false` |
+| `coolify-token` | `''` | API token do Coolify (scope root), enviado como Bearer |
 
-## Secret no repo da LP
+Se qualquer um dos dois `coolify-*` estiver vazio, o deploy é pulado — o
+commit fica no repo mas o rebuild precisa ser manual.
+
+## Secrets no repo da LP
 
 Setar em `Settings → Secrets and variables → Actions`:
 
-- `COOLIFY_DEPLOY_WEBHOOK` — URL de deploy webhook da app LP (achada no
-  Coolify: app → Webhooks ou Resource Operations).
+- `COOLIFY_DEPLOY_URL` — URL completa `http://<host>:<port>/api/v1/deploy?uuid=<UUID-da-app>&force=false`. Achar o UUID: no Coolify, abre a app → URL do browser termina em `/applications/<uuid>`.
+- `COOLIFY_TOKEN` — API token do Coolify (criar em Keys & Tokens → API Tokens, scope root).
 
-**Por que um só secret por LP?** A arquitetura antiga usava `COOLIFY_URL` +
-`COOLIFY_TOKEN` + `COOLIFY_APP_UUID` (3 secrets) e tentava disparar deploy
-via `/api/v1/deploy?uuid=...` com Bearer. Na instalação Coolify em uso,
-esse endpoint não estava respondendo como API (retornava 302 → login pra
-GET e 419 CSRF pra POST, mesmo com token root). O webhook de deploy
-funciona em qualquer versão: cada app tem uma URL única em que a URL
-inteira é o segredo. Simplifica a infra e dispensa gerenciamento de token.
+**`COOLIFY_TOKEN` é compartilhável entre LPs** (mesma instância Coolify =
+mesmo token funciona). `COOLIFY_DEPLOY_URL` muda por LP (UUID diferente).
+Como `eduardoendo-hub` é user account (sem org-level secrets), setar por
+repo mesmo.
+
+### Como foi parar nessa arquitetura
+
+Antes tentamos `GET /api/v1/deploy` (resposta: `"This endpoint has changed
+to a POST request."`) e Deploy Webhook puro (não existe nessa versão).
+A API moderna do Coolify v4 Laravel usa `POST /api/v1/deploy?uuid=XXX`
+com Bearer — simples e confiável.
 
 ## Visibilidade
 
