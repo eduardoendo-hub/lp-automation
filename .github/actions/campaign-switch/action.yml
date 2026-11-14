@@ -1,7 +1,8 @@
 name: 'Campaign switch'
 description: >
   Roda o script de switch de turma da LP (que vive dentro de cada repo de LP)
-  e, se algo foi commitado, dispara redeploy no Coolify via API.
+  e, se algo foi commitado, dispara redeploy no Coolify via webhook de deploy
+  da app.
 
 inputs:
   switch-script:
@@ -12,16 +13,12 @@ inputs:
     description: 'Versão do Node pra rodar o script'
     required: false
     default: '20'
-  coolify-url:
-    description: 'URL base da sua instalação Coolify (ex: https://coolify.example.com)'
-    required: false
-    default: ''
-  coolify-token:
-    description: 'API token do Coolify (criado em Settings > Keys & Tokens)'
-    required: false
-    default: ''
-  coolify-uuid:
-    description: 'UUID da app no Coolify a ser redeployada'
+  coolify-deploy-webhook:
+    description: >
+      URL completa do deploy webhook da app no Coolify. A URL inteira é o
+      segredo — nao usa Bearer. Encontrada no Coolify em: app → Webhooks (ou
+      Resource Operations). Se vazio, o deploy e' pulado (commit fica mas
+      rebuild precisa ser manual).
     required: false
     default: ''
 
@@ -47,32 +44,28 @@ runs:
       shell: bash
       run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-    - name: Dispara deploy no Coolify
-      if: steps.pre.outputs.sha != steps.post.outputs.sha && inputs.coolify-token != '' && inputs.coolify-url != '' && inputs.coolify-uuid != ''
+    - name: Dispara deploy no Coolify (webhook)
+      if: steps.pre.outputs.sha != steps.post.outputs.sha && inputs.coolify-deploy-webhook != ''
       shell: bash
       env:
-        COOLIFY_URL:      ${{ inputs.coolify-url }}
-        COOLIFY_TOKEN:    ${{ inputs.coolify-token }}
-        COOLIFY_APP_UUID: ${{ inputs.coolify-uuid }}
+        WEBHOOK_URL: ${{ inputs.coolify-deploy-webhook }}
       run: |
         set -euo pipefail
-        echo "Disparando redeploy em $COOLIFY_URL app $COOLIFY_APP_UUID"
-        http_code=$(curl -sS -o /tmp/coolify.out -w "%{http_code}" \
-          -X GET "$COOLIFY_URL/api/v1/deploy?uuid=$COOLIFY_APP_UUID&force=false" \
-          -H "Authorization: Bearer $COOLIFY_TOKEN")
+        http_code=$(curl -sS -o /tmp/out -w "%{http_code}" "$WEBHOOK_URL")
         echo "HTTP $http_code"
-        cat /tmp/coolify.out
+        head -c 500 /tmp/out || true
+        echo
         case "$http_code" in
           2??) echo "deploy disparado." ;;
           *)   echo "falhou — rebuild manual no Coolify."; exit 1 ;;
         esac
 
     - name: Status final (sem deploy)
-      if: steps.pre.outputs.sha == steps.post.outputs.sha || inputs.coolify-token == '' || inputs.coolify-url == '' || inputs.coolify-uuid == ''
+      if: steps.pre.outputs.sha == steps.post.outputs.sha || inputs.coolify-deploy-webhook == ''
       shell: bash
       run: |
         if [ "${{ steps.pre.outputs.sha }}" = "${{ steps.post.outputs.sha }}" ]; then
           echo "Sem commit novo — nada a deployar."
         else
-          echo "Commit novo foi feito, mas secrets do Coolify não estão setados — rebuild manual no dashboard."
+          echo "Commit feito, mas secret coolify-deploy-webhook ausente — rebuild manual no dashboard."
         fi

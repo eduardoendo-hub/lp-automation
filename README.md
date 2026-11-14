@@ -47,10 +47,8 @@ jobs:
           fetch-depth: 0
       - uses: eduardoendo-hub/lp-automation/.github/actions/campaign-switch@main
         with:
-          switch-script: scripts/campaign-switch.mjs     # opcional (default)
-          coolify-url:   ${{ secrets.COOLIFY_URL }}
-          coolify-token: ${{ secrets.COOLIFY_TOKEN }}
-          coolify-uuid:  ${{ secrets.COOLIFY_APP_UUID }}
+          switch-script:          scripts/campaign-switch.mjs     # opcional (default)
+          coolify-deploy-webhook: ${{ secrets.COOLIFY_DEPLOY_WEBHOOK }}
 ```
 
 E dentro da LP, crie `scripts/campaign-switch.mjs` + `campaigns-schedule.json`
@@ -73,23 +71,22 @@ E dentro da LP, crie `scripts/campaign-switch.mjs` + `campaigns-schedule.json`
 |---|---|---|
 | `switch-script` | `scripts/campaign-switch.mjs` | Caminho do script Node da LP |
 | `node-version` | `20` | Versão do Node |
-| `coolify-url` | `''` | URL base do Coolify (ex: `https://coolify.technowhub.ai`) |
-| `coolify-token` | `''` | Bearer token da API Coolify |
-| `coolify-uuid` | `''` | UUID da app LP no Coolify |
+| `coolify-deploy-webhook` | `''` | URL completa do deploy webhook da app no Coolify. A URL inteira é o segredo (não usa Bearer). Se vazia, o deploy é pulado. |
 
-Se qualquer um dos 3 `coolify-*` estiver vazio, o passo de deploy é pulado.
-
-## Secrets no repo da LP
+## Secret no repo da LP
 
 Setar em `Settings → Secrets and variables → Actions`:
 
-- `COOLIFY_URL`
-- `COOLIFY_TOKEN`
-- `COOLIFY_APP_UUID`
+- `COOLIFY_DEPLOY_WEBHOOK` — URL de deploy webhook da app LP (achada no
+  Coolify: app → Webhooks ou Resource Operations).
 
-Como `eduardoendo-hub` é user account (não organization), os secrets precisam
-ser configurados por repo. `COOLIFY_URL` e `COOLIFY_TOKEN` são iguais em
-todas as LPs (mesma instância Coolify); `COOLIFY_APP_UUID` varia.
+**Por que um só secret por LP?** A arquitetura antiga usava `COOLIFY_URL` +
+`COOLIFY_TOKEN` + `COOLIFY_APP_UUID` (3 secrets) e tentava disparar deploy
+via `/api/v1/deploy?uuid=...` com Bearer. Na instalação Coolify em uso,
+esse endpoint não estava respondendo como API (retornava 302 → login pra
+GET e 419 CSRF pra POST, mesmo com token root). O webhook de deploy
+funciona em qualquer versão: cada app tem uma URL única em que a URL
+inteira é o segredo. Simplifica a infra e dispensa gerenciamento de token.
 
 ## Visibilidade
 
