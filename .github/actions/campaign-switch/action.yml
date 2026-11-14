@@ -1,0 +1,78 @@
+name: 'Campaign switch'
+description: >
+  Roda o script de switch de turma da LP (que vive dentro de cada repo de LP)
+  e, se algo foi commitado, dispara redeploy no Coolify via API.
+
+inputs:
+  switch-script:
+    description: 'Caminho (relativo à raiz do repo da LP) do script Node que aplica o switch'
+    required: false
+    default: 'scripts/campaign-switch.mjs'
+  node-version:
+    description: 'Versão do Node pra rodar o script'
+    required: false
+    default: '20'
+  coolify-url:
+    description: 'URL base da sua instalação Coolify (ex: https://coolify.example.com)'
+    required: false
+    default: ''
+  coolify-token:
+    description: 'API token do Coolify (criado em Settings > Keys & Tokens)'
+    required: false
+    default: ''
+  coolify-uuid:
+    description: 'UUID da app no Coolify a ser redeployada'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Pre-switch HEAD
+      id: pre
+      shell: bash
+      run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+    - name: Rodar script de switch
+      shell: bash
+      run: node "${{ inputs.switch-script }}"
+
+    - name: Post-switch HEAD
+      id: post
+      shell: bash
+      run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+    - name: Dispara deploy no Coolify
+      if: steps.pre.outputs.sha != steps.post.outputs.sha && inputs.coolify-token != '' && inputs.coolify-url != '' && inputs.coolify-uuid != ''
+      shell: bash
+      env:
+        COOLIFY_URL:      ${{ inputs.coolify-url }}
+        COOLIFY_TOKEN:    ${{ inputs.coolify-token }}
+        COOLIFY_APP_UUID: ${{ inputs.coolify-uuid }}
+      run: |
+        set -euo pipefail
+        echo "Disparando redeploy em $COOLIFY_URL app $COOLIFY_APP_UUID"
+        http_code=$(curl -sS -o /tmp/coolify.out -w "%{http_code}" \
+          -X GET "$COOLIFY_URL/api/v1/deploy?uuid=$COOLIFY_APP_UUID&force=false" \
+          -H "Authorization: Bearer $COOLIFY_TOKEN")
+        echo "HTTP $http_code"
+        cat /tmp/coolify.out
+        case "$http_code" in
+          2??) echo "deploy disparado." ;;
+          *)   echo "falhou — rebuild manual no Coolify."; exit 1 ;;
+        esac
+
+    - name: Status final (sem deploy)
+      if: steps.pre.outputs.sha == steps.post.outputs.sha || inputs.coolify-token == '' || inputs.coolify-url == '' || inputs.coolify-uuid == ''
+      shell: bash
+      run: |
+        if [ "${{ steps.pre.outputs.sha }}" = "${{ steps.post.outputs.sha }}" ]; then
+          echo "Sem commit novo — nada a deployar."
+        else
+          echo "Commit novo foi feito, mas secrets do Coolify não estão setados — rebuild manual no dashboard."
+        fi
